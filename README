@@ -1,0 +1,36 @@
+Infer entity ids on various platforms, at the moment Facebook, Twitter and Wikipedia.  Requires API access to some platforms.
+
+How it works: 
+  Given a url (http://www.foo.com/) and a name (Foo) it will search
+  for entity presences, in the following order, if applicable, in
+
+     - metadata info present in the "head" tag of the url
+       (eg <head><meta property="twitter:site" value="foo"> ... )
+     - link on the website (eg <a href="https://facebook.com/foo">)
+     - text search of the platform api or Google for the name
+
+All of these strategies are confirmed by a backwards link to the original 
+website. (eg https://twitter.com/foo must have a link to http://www.foo.com/)
+
+Usage:
+
+Socializer.configure do |config|
+
+  #Twitter - Get your credentials from your app at the Twitter Dev site.
+  #Create an app if you don't have one.
+
+  config.twitter_consumer_key    = 'XXXX'
+  config.twitter_consumer_secret = 'XXXX'
+  config.twitter_access_token = 'XXXX'
+  config.twitter_access_token_secret = 'XXXX'
+
+  #Facebook - Get your credentials from your app at the Facebook Dev site
+
+  config.facebook_app_secret = 'XXXX'
+  config.facebook_app_id = 'XXXX'
+end
+
+Socializer.find('http://www.google.com/','Google')
+#  => {:wikipedia => "http://en.wikipedia.org/wiki/Google",
+#       :facebook => "https://www.facebook.com/Google",
+#       :twitter => "https://twitter.com/google"}

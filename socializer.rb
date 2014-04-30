@@ -1,41 +1,7 @@
 #!/usr/bin/ruby
 
-# Infer entity ids on various platforms.  Requires API access to some platforms
-#
-# How it works: 
-#   Given a url (http://www.foo.com/) and a name (Foo) it will search
-#   for entity presences, in the following order, if applicable, in
-#
-#      - metadata info present in the "head" tag of the url
-#        (eg <head><meta property="twitter:site" value="foo"> ... )
-#      - link on the website (eg <a href="https://facebook.com/foo">)
-#      - text search of the platform api or Google for the name
-#
-# All of these strategies are confirmed by a backwards link to the original 
-# website. (eg https://twitter.com/foo must have a link to http://www.foo.com/)
-#
-# Usage:
-#
-# Socializer.configure do |config|
-#
-##   Twitter - Get your credentials from your app at the Twitter Dev site.
-##   Create an app if you don't have one.
-#
-#   config.twitter_consumer_key    = 'XXXX'
-#   config.twitter_consumer_secret = 'XXXX'
-#   config.twitter_access_token = 'XXXX'
-#   config.twitter_access_token_secret = 'XXXX'
-#
-##   Facebook - Get your credentials from your app at the Facebook Dev site
-#
-#   config.facebook_app_secret = 'XXXX'
-#   config.facebook_app_id = 'XXXX'
-# end
-#
-# Socializer.find('http://www.google.com/','Google')
-#   => {:wikipedia => "http://en.wikipedia.org/wiki/Google",
-#        :facebook => "https://www.facebook.com/Google",
-#        :twitter => "https://twitter.com/google"}
+# http://www.thinkcontext.org/
+# License: GPL
 
 require 'pp'
 require 'mechanize'
@@ -56,7 +22,7 @@ module Socializer
   end
  
   class Configuration
-    attr_accessor :facebook_app_secret, :facebook_app_id, :twitter_consumer_key, :twitter_consumer_secret, :twitter_access_token, :twitter_access_token_secret, :agent, :facebook_client, :twitter_client
+    attr_accessor :facebook_app_secret, :facebook_app_id, :twitter_consumer_key, :twitter_consumer_secret, :twitter_access_token, :twitter_access_token_secret, :agent, :facebook_client, :twitter_client, :debug
  
     def initialize
       @facebook_app_secret = nil
@@ -68,15 +34,14 @@ module Socializer
       @agent = Mechanize.new
       @facebook_client = nil
       @twitter_client = nil
+      @debug = nil
     end
   end
   
   def self.find(url,name, *networks)
-    pp "find", url,name,*networks
     agent = self.configuration.agent
     sleep 1
     uri = URI(url)
-    pp  uri
     if(uri.scheme.match('http') and uri.host)
       uri.host = uri.host.downcase
       uri.path || uri.path = '/' 
@@ -91,7 +56,6 @@ module Socializer
       end
     end
     ret = {}
-    puts "about to begin"
     if(networks.length == 0 or (networks[0].kind_of?(Array) and networks[0].index('wikipedia') != nil))
       if(wikipedia = find_wikipedia(url,name,page))
         ret['wikipedia'] = wikipedia
@@ -107,7 +71,6 @@ module Socializer
         ret['facebook'] = facebook
       end
     end
-    puts "done"
     return ret
   end
 
@@ -140,24 +103,29 @@ module Socializer
         return tu.attrs[:entities][:url][:urls][0][:expanded_url]
       end
     rescue Exception => e
-      pp e
+      self.configuration.debug and $stderr.puts "twitter_back_check: #{e.message}"
       return
     end
   end
 
-  def facebook_back_check(handle)
+  def self.facebook_back_check(handle)
     facebook_client = self.configuration.facebook_client
     begin
       f = facebook_client.get_object(handle)
-      return f['website'].split(' ')[0]
+      if(f['website'])
+        return f['website'].split(' ')[0] # for some godawful reason multiple urls can be in this field, just return the first one
+      else
+        return
+      end
     rescue Exception => e
-      puts e
+      self.configuration.debug and $stderr.puts "facebook_back_check: #{handle}"
+      $stderr.puts e.message
       return
     end
   end
   
   def self.find_facebook(url,name,page)
-    puts "find_facebook #{name}"
+    self.configuration.debug and $stderr.puts "find_facebook #{name}"
     if(!self.configuration.facebook_client)
       self.setup_facebook
       if(!self.configuration.facebook_client)
@@ -177,8 +145,8 @@ module Socializer
           if(m = fb.match('facebook.com/(\w+)$') and m.length == 2)
             fb_new = m[1]
             if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
-              puts "href"
-              return fb_new
+              self.configuration.debug and $stderr.puts "fb href: #{fb_new}"
+              return "http://facebook.com/#{fb_new}"
             end
           end
         end
@@ -188,8 +156,8 @@ module Socializer
       if(m = page.css('head meta[property="fb:page_id"]') and m.length > 0 and m[0]['content'])
         fb_new = m[0]['content']
         if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
-          puts "page_id"
-          return fb_new
+          self.configuration.debug and puts "fb page_id: #{fb_new}"
+          return "http://facebook.com/#{fb_new}"          
         end
       end
       
@@ -199,15 +167,17 @@ module Socializer
         if(r.uri and u = URI(r.uri) and u.host.match('facebook.com') and u.path.length > 1)
           fb_new = u.path.split('/').last
           if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
-            puts "page_id"
-            return fb_new
+            self.configuration.debug and puts "fb google: #{fb_new}"
+            return "http://facebook.com/#{fb_new}"
           end
         end
         break # only try the first one
       end
     
-    rescue 
+    rescue Exception => e
       $stderr.puts "find_facebook fail #{name} #{url}"
+      $stderr.puts e.message
+      $stderr.puts e.backtrace
     end
     
     # too many false positives, usually subsidiaries in other countries
@@ -229,7 +199,7 @@ module Socializer
   end
 
   def self.find_wikipedia(url,name,page)
-    puts "find_wikipedia #{name}"
+    self.configuration.debug and $stderr.puts "find_wikipedia #{name} #{url}"
     agent = self.configuration.agent
     count = 0
     begin
@@ -243,15 +213,14 @@ module Socializer
         end        
       end
     rescue Exception => e
-      $stderr.puts "find wikipedia, couldn't get %s" % url
+      $stderr.puts "find_wikipedia, couldn't get %s" % url
       pp e
       return
     end
-    puts "end find_wikipedia"
   end
 
   def self.find_twitter(url,name,page)
-    puts "find_twitter #{name}"
+    self.configuration.debug and $stderr.puts "find_twitter #{name} #{url}"
     if(!self.configuration.twitter_client)
       self.setup_twitter
       if(!self.configuration.twitter_client)
@@ -261,12 +230,15 @@ module Socializer
     end
     twitter_client = self.configuration.twitter_client
 
-    # t_new = nil
+    t_new = nil
 
-    # if(m = page.css('head meta[property="twitter:site"]') and m.length > 0 and m[0]['content'])
-    #   t_new = m[0]['content'].sub('@','')
-    #   puts "twitter:site " + t_new
-    # end
+    if(m = page.css('head meta[property="twitter:site"]') and m.length > 0 and m[0]['content'])
+      t_new = m[0]['content'].sub('@','').downcase
+      if(sigurl(url) == sigurl(twitter_back_check(t_new)))
+        self.configuration.debug and $stderr.puts "twitter:site " + t_new
+        return t_new
+      end
+    end
     
     # if(m = page.css('head meta[property="twitter:account_id"]') and m.length > 0 and m[0]['content'])
     #   t_new = m[0]['content']
@@ -278,6 +250,7 @@ module Socializer
       if(twitter['href'] and twitter = twitter['href'].sub('#!/','') and m = twitter.match('twitter\.com/([\-\w]+)') and m.length == 2)
         t_new = m[1].downcase
         if(sigurl(url) == sigurl(twitter_back_check(t_new)))
+          self.configuration.debug and $stderr.puts "twitter link " + t_new
           return t_new
         end
       end
@@ -286,10 +259,11 @@ module Socializer
     twitter_client.user_search(name).each do |tu|
       begin
         if(tu['verified'] and sigurl(tu.attrs[:entities][:url][:urls][0][:expanded_url]) == sigurl(url))
+          self.configuration.debug and $stderr.puts "client " + tu[:screen_name].downcase
           return 'https://twitter.com/' + tu[:screen_name].downcase
         end
       rescue
-        
+        $stderr.puts "Twitter api error #{name} #{url}"
       end
     end
     return

@@ -41,6 +41,7 @@ module Socializer
   def self.find(url,name, *networks)
     agent = self.configuration.agent
     sleep 1
+    name.strip!
     uri = URI(url)
     if(uri.scheme.match('http') and uri.host)
       uri.host = uri.host.downcase
@@ -139,15 +140,12 @@ module Socializer
     begin
       
       # look in fb links listed on the homepage
-      page.css("a[href*='facebook.com/']").map {|x| x['href'] }.uniq.compact.each do |fb|
-        if(fb['href'])
-          fb = fb['href'].downcase
-          if(m = fb.match('facebook.com/(\w+)$') and m.length == 2)
-            fb_new = m[1]
-            if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
-              self.configuration.debug and $stderr.puts "fb href: #{fb_new}"
-              return "http://facebook.com/#{fb_new}"
-            end
+      page.css("a[href*='facebook.com/']").map {|x| x['href'].downcase }.uniq.compact.each do |fb|
+        if(m = fb.match('facebook.com/(\w+)$') and m.length == 2)
+          fb_new = m[1]
+          if(sigurl(fb) == sigurl(facebook_back_check(fb_new)))
+            self.configuration.debug and $stderr.puts "fb href: #{fb_new}"
+            return "http://facebook.com/#{fb_new}"
           end
         end
       end
@@ -160,20 +158,21 @@ module Socializer
           return "http://facebook.com/#{fb_new}"          
         end
       end
-      
-      # search Google, check first result
-      
-      Google::Search::Web.new(:query => "#{name} facebook").each do |r|      
-        if(r.uri and u = URI(r.uri) and u.host.match('facebook.com') and u.path.length > 1)
-          fb_new = u.path.split('/').last
-          if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
-            self.configuration.debug and puts "fb google: #{fb_new}"
-            return "http://facebook.com/#{fb_new}"
+
+      if(name.length > 0)
+        # search Google, check first result
+        
+        Google::Search::Web.new(:query => "#{name} facebook").each do |r|      
+          if(r.uri and u = URI(r.uri) and u.host.match('facebook.com') and u.path.length > 1)
+            fb_new = u.path.split('/').last
+            if(sigurl(url) == sigurl(facebook_back_check(fb_new)))
+              self.configuration.debug and puts "fb google: #{fb_new}"
+              return "http://facebook.com/#{fb_new}"
+            end
           end
+          break # only try the first one
         end
-        break # only try the first one
       end
-    
     rescue Exception => e
       $stderr.puts "find_facebook fail #{name} #{url}"
       $stderr.puts e.message
@@ -256,14 +255,16 @@ module Socializer
       end
     end
 
-    twitter_client.user_search(name).each do |tu|
-      begin
-        if(tu['verified'] and sigurl(tu.attrs[:entities][:url][:urls][0][:expanded_url]) == sigurl(url))
-          self.configuration.debug and $stderr.puts "client " + tu[:screen_name].downcase
-          return 'https://twitter.com/' + tu[:screen_name].downcase
+    if(name.length > 0)
+      twitter_client.user_search(name).each do |tu|
+        begin
+          if(tu['verified'] and sigurl(tu.attrs[:entities][:url][:urls][0][:expanded_url]) == sigurl(url))
+            self.configuration.debug and $stderr.puts "client " + tu[:screen_name].downcase
+            return 'https://twitter.com/' + tu[:screen_name].downcase
+          end
+        rescue
+          $stderr.puts "Twitter api error #{name} #{url}"
         end
-      rescue
-        $stderr.puts "Twitter api error #{name} #{url}"
       end
     end
     return
